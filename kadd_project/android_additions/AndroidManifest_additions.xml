@@ -1,0 +1,57 @@
+<!--
+  Merge these into android/app/src/main/AndroidManifest.xml
+  (inside <manifest> / <application> as noted).
+-->
+
+<!-- Inside <manifest>, alongside existing permissions -->
+<uses-permission android:name="android.permission.CAMERA" />
+<uses-permission android:name="android.permission.ACCESS_FINE_LOCATION" />
+<uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
+<uses-permission android:name="android.permission.PACKAGE_USAGE_STATS"
+    tools:ignore="ProtectedPermissions" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
+<uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+<uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+<uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+
+<!-- Inside <application> -->
+<service
+    android:name=".LockForegroundService"
+    android:exported="false"
+    android:foregroundServiceType="specialUse">
+    <property
+        android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+        android:value="Blocks distracting apps until the user completes an exercise or prayer-rug check, at the user's own request" />
+</service>
+
+<activity
+    android:name=".LockActivity"
+    android:exported="false"
+    android:theme="@style/LaunchTheme"
+    android:launchMode="singleTask"
+    android:showWhenLocked="false"
+    android:turnScreenOn="false" />
+
+<receiver android:name=".AthanLockReceiver" android:exported="false" />
+
+<receiver android:name=".BootReceiver" android:exported="false">
+    <intent-filter>
+        <action android:name="android.intent.action.BOOT_COMPLETED" />
+    </intent-filter>
+</receiver>
+
+<!--
+  Google Play policy note: android:foregroundServiceType="specialUse" plus
+  the PROPERTY_SPECIAL_USE_FGS_SUBTYPE justification string above are
+  required as of Play's 2024 foreground-service policy updates for services
+  that don't fit the standard predefined types. Write the real justification
+  text carefully before submission — Play reviewers read it.
+
+  The PACKAGE_USAGE_STATS permission cannot be granted through the normal
+  runtime permission dialog; the user must be sent to
+  Settings.ACTION_USAGE_ACCESS_SETTINGS (already wired via
+  AppUsageService.requestUsageAccess()) and enable it manually. Onboarding
+  needs a clear screen explaining why, before that hand-off — reviewers and
+  users both bounce off an unexplained system settings redirect.
+-->
