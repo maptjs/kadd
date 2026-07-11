@@ -26,8 +26,18 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Flutter doctor
+        run: flutter doctor -v
+
+      - name: Show Android project
+        run: |
+          ls -R android
+          cat android/settings.gradle.kts
+          cat android/build.gradle.kts
+          cat android/app/build.gradle.kts
+
       - name: Build release APK
-        run: flutter build apk --release --verbose
+        run: flutter build apk --release -v
 
       - name: Upload APK
         if: success()
@@ -35,5 +45,4 @@ jobs:
         with:
           name: kadd-apk
           path: build/app/outputs/flutter-apk/app-release.apk
-          if-no-files-found: error
           retention-days: 30
