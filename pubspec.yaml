@@ -21,7 +21,7 @@ dependencies:
 
   # Camera + pose detection for pushup/squat rep counting
   camera: ^0.10.6
-  google_mlkit_pose_detection: ^0.10.0
+  google_mlkit_pose_detection: ^0.14.1
 
   # On-device rug classification (custom trained TFLite model — see
   # assets/models/README.md). Uses ML Kit's Image Labeling API with a local
