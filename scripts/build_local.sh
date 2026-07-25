@@ -16,6 +16,9 @@ python3 scripts/patch_manifest.py
 echo "==> flutter pub get"
 flutter pub get
 
+echo "==> Generating launcher icons"
+flutter pub run flutter_launcher_icons
+
 echo "==> Building debug APK (use --release for a release build)"
 if [[ "${1:-}" == "--release" ]]; then
   flutter build apk --release

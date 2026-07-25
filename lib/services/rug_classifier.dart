@@ -1,121 +1,100 @@
-import 'dart:typed_data';
+import 'dart:io';
 import 'package:flutter/services.dart' show rootBundle;
-import 'package:image/image.dart' as img;
-import 'package:tflite_flutter/tflite_flutter.dart';
+import 'package:google_mlkit_image_labeling/google_mlkit_image_labeling.dart';
+import 'package:google_mlkit_commons/google_mlkit_commons.dart';
+import 'package:path/path.dart' as path;
+import 'package:path_provider/path_provider.dart';
 
-/// Wraps a TFLite image classifier trained on prayer-rug vs. not-prayer-rug
-/// photos (see assets/models/README.md for how to produce one, e.g. via
-/// Google's Teachable Machine for a fast first version).
+/// Wraps ML Kit's Image Labeling API with a custom local model trained on
+/// prayer-rug vs. not-prayer-rug photos (see assets/models/README.md for
+/// how to produce one, e.g. via Google's Teachable Machine for a fast first
+/// version).
 ///
-/// Handles both export formats Teachable Machine can produce:
-///  - float32 model: input pixels expected as 0.0–1.0, output already a
-///    probability per class.
-///  - quantized (uint8) model: input pixels expected as raw 0–255 bytes,
-///    output is a uint8 that must be divided by 255 to get a probability.
-/// Which one you have is read from the model itself at load time, so this
-/// class works unmodified either way.
+/// Uses google_mlkit_image_labeling's LocalLabelerOptions rather than the
+/// tflite_flutter package — see pubspec.yaml's comment on that dependency
+/// for why. ML Kit's native runtime handles the model's input format
+/// (float32 vs. quantized) internally, so this class doesn't need to branch
+/// on that the way a raw TFLite wrapper would.
 class RugClassifier {
-  Interpreter? _interpreter;
-  List<String> _labels = [];
-  int _rugLabelIndex = 0;
-  late int _inputSize;
-  late TensorType _inputType;
+  ImageLabeler? _labeler;
+  bool _rugLabelIsPositive = true; // flipped if labels.txt lists rug second
 
-  bool get isLoaded => _interpreter != null;
+  bool get isLoaded => _labeler != null;
 
-  /// Call once (e.g. in RugScanScreen.initState) — loading the model and
-  /// label file from assets is I/O-bound and shouldn't run per-frame.
+  /// Call once (e.g. in RugScanScreen.initState). ML Kit's local labeler
+  /// needs a real file path, not an asset URI, so the bundled asset is
+  /// copied to the app's support directory on first load.
   Future<void> load({
     String modelAsset = 'assets/models/rug_classifier.tflite',
     String labelsAsset = 'assets/models/labels.txt',
   }) async {
     try {
-      _interpreter = await Interpreter.fromAsset(modelAsset);
+      final modelPath = await _copyAssetToFile(modelAsset);
+      _labeler = ImageLabeler(
+        options: LocalLabelerOptions(
+          modelPath: modelPath,
+          confidenceThreshold: 0.0, // we apply our own gate in classify()
+        ),
+      );
     } catch (e) {
       // Model not bundled yet — expected until assets/models/README.md's
-      // training plan is carried out. Callers should treat isLoaded==false
-      // as "always fail closed", same as the previous hardcoded stub did.
-      _interpreter = null;
+      // training plan is carried out. isLoaded==false means classify()
+      // fails closed, same as before.
+      _labeler = null;
       return;
     }
 
-    final inputShape = _interpreter!.getInputTensor(0).shape; // [1, H, W, 3]
-    _inputSize = inputShape[1];
-    _inputType = _interpreter!.getInputTensor(0).type;
-
     try {
       final raw = await rootBundle.loadString(labelsAsset);
-      _labels = raw
+      final labels = raw
           .split('\n')
           .map((l) => l.trim())
           .where((l) => l.isNotEmpty)
-          // Teachable Machine writes "0 rug", "1 not_rug" — drop the index.
           .map((l) => l.contains(' ') ? l.substring(l.indexOf(' ') + 1) : l)
           .toList();
-      _rugLabelIndex = _labels.indexWhere((l) => l.toLowerCase().contains('rug'));
-      if (_rugLabelIndex == -1) _rugLabelIndex = 0; // fall back to first class
+      // Teachable Machine assigns label indices in training order — we
+      // just need to know whether "rug" was class 0 or class 1, since
+      // ML Kit returns each label by name already (no index juggling
+      // needed at inference time the way raw TFLite output requires).
+      final rugIndex = labels.indexWhere((l) => l.toLowerCase().contains('rug'));
+      _rugLabelIsPositive = rugIndex != 1; // default true unless rug is index 1 named oddly
     } catch (e) {
-      _labels = ['rug', 'not_rug'];
-      _rugLabelIndex = 0;
+      // Fall back to assuming a label literally called "rug" exists.
     }
   }
 
-  /// Returns the model's confidence (0.0–1.0) that [jpegBytes] shows a
-  /// prayer rug. Returns 0.0 if no model is loaded, so callers fail closed
-  /// by default rather than accidentally unlocking on a missing model.
-  Future<double> classify(Uint8List jpegBytes) async {
-    if (_interpreter == null) return 0.0;
-
-    final decoded = img.decodeImage(jpegBytes);
-    if (decoded == null) return 0.0;
-    final resized = img.copyResize(decoded, width: _inputSize, height: _inputSize);
-
-    final input = _inputType == TensorType.uint8
-        ? _toUint8Input(resized)
-        : _toFloat32Input(resized);
-
-    final outputTensor = _interpreter!.getOutputTensor(0);
-    final output = outputTensor.type == TensorType.uint8
-        ? [List<int>.filled(_labels.length, 0)]
-        : [List<double>.filled(_labels.length, 0.0)];
-
-    _interpreter!.run(input, output);
-
-    final scores = output[0];
-    final rawScore = scores[_rugLabelIndex];
-    final confidence = outputTensor.type == TensorType.uint8
-        ? (rawScore as int) / 255.0
-        : (rawScore as double);
-
-    return confidence.clamp(0.0, 1.0);
+  Future<String> _copyAssetToFile(String assetPath) async {
+    final dir = await getApplicationSupportDirectory();
+    final filePath = path.join(dir.path, path.basename(assetPath));
+    final file = File(filePath);
+    if (!await file.exists()) {
+      final data = await rootBundle.load(assetPath);
+      await file.writeAsBytes(data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes));
+    }
+    return filePath;
   }
 
-  List<List<List<List<double>>>> _toFloat32Input(img.Image image) {
-    return [
-      List.generate(
-        _inputSize,
-        (y) => List.generate(_inputSize, (x) {
-          final p = image.getPixel(x, y);
-          return [p.r / 255.0, p.g / 255.0, p.b / 255.0];
-        }),
-      ),
-    ];
-  }
+  /// Returns the model's confidence (0.0–1.0) that the photo at [imagePath]
+  /// shows a prayer rug. Returns 0.0 if no model is loaded, so callers fail
+  /// closed by default rather than accidentally unlocking on a missing model.
+  Future<double> classify(String imagePath) async {
+    if (_labeler == null) return 0.0;
 
-  List<List<List<List<int>>>> _toUint8Input(img.Image image) {
-    return [
-      List.generate(
-        _inputSize,
-        (y) => List.generate(_inputSize, (x) {
-          final p = image.getPixel(x, y);
-          return [p.r.toInt(), p.g.toInt(), p.b.toInt()];
-        }),
-      ),
-    ];
+    final inputImage = InputImage.fromFilePath(imagePath);
+    final labels = await _labeler!.processImage(inputImage);
+
+    for (final label in labels) {
+      if (label.label.toLowerCase().contains('rug')) {
+        return label.confidence.clamp(0.0, 1.0);
+      }
+    }
+    // No "rug" label came back above the labeler's internal threshold —
+    // treat as high-confidence "not a rug".
+    return 0.0;
   }
 
   void dispose() {
-    _interpreter?.close();
-    _interpreter = null;
+    _labeler?.close();
+    _labeler = null;
   }
 }

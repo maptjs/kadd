@@ -76,7 +76,7 @@ class RootNav extends StatefulWidget {
   State<RootNav> createState() => _RootNavState();
 }
 
-class _RootNavState extends State<RootNav> {
+class _RootNavState extends State<RootNav> with WidgetsBindingObserver {
   int _index = 0;
 
   static const _screens = [
@@ -85,6 +85,25 @@ class _RootNavState extends State<RootNav> {
     PrayerSettingsScreen(),
     StatsScreen(),
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      context.read<AppState>().checkUsageAccess();
+    }
+  }
 
   @override
   Widget build(BuildContext context) {

@@ -1,6 +1,6 @@
-import 'dart:typed_data';
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import '../models/prayer.dart';
 import '../services/rug_classifier.dart';
@@ -28,6 +28,7 @@ class _RugScanScreenState extends State<RugScanScreen> {
   final _classifier = RugClassifier();
   double? _confidence;
   bool _verifying = false;
+  bool _showSuccess = false;
 
   static const _confidenceGate = 0.85;
 
@@ -55,8 +56,7 @@ class _RugScanScreenState extends State<RugScanScreen> {
     setState(() => _verifying = true);
 
     final file = await _controller!.takePicture();
-    final bytes = await file.readAsBytes();
-    final confidence = await _classify(bytes);
+    final confidence = await _classify(file.path);
 
     setState(() {
       _confidence = confidence;
@@ -64,15 +64,20 @@ class _RugScanScreenState extends State<RugScanScreen> {
     });
 
     if (confidence >= _confidenceGate) {
+      HapticFeedback.heavyImpact();
+      setState(() => _showSuccess = true);
       await context.read<AppState>().onRugVerified();
+      await Future.delayed(const Duration(milliseconds: 700));
       if (mounted) Navigator.pop(context);
+    } else {
+      HapticFeedback.lightImpact(); // gentle nudge: try again, not a failure buzz
     }
   }
 
   /// Delegates to RugClassifier. Returns 0.0 (fails closed) until
   /// assets/models/rug_classifier.tflite actually exists — see
   /// assets/models/README.md for the training plan.
-  Future<double> _classify(Uint8List bytes) => _classifier.classify(bytes);
+  Future<double> _classify(String imagePath) => _classifier.classify(imagePath);
 
   @override
   void dispose() {
@@ -186,6 +191,38 @@ class _RugScanScreenState extends State<RugScanScreen> {
                 ),
               ),
             ),
+            if (_showSuccess)
+              AnimatedOpacity(
+                opacity: 1,
+                duration: const Duration(milliseconds: 200),
+                child: Container(
+                  color: AppColors.ink.withOpacity(0.85),
+                  child: Center(
+                    child: TweenAnimationBuilder<double>(
+                      tween: Tween(begin: 0.6, end: 1.0),
+                      duration: const Duration(milliseconds: 400),
+                      curve: Curves.elasticOut,
+                      builder: (context, scale, child) => Transform.scale(scale: scale, child: child),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 100,
+                            height: 100,
+                            alignment: Alignment.center,
+                            decoration: const BoxDecoration(shape: BoxShape.circle, color: AppColors.unlock),
+                            child: const Icon(Icons.check, size: 56, color: Color(0xFF1A1F0A)),
+                          ),
+                          const SizedBox(height: 16),
+                          Text('تقبّل الله 🤲', style: AppTextStyles.kufi(size: 20)),
+                          const SizedBox(height: 4),
+                          Text('تطبيقاتك فتحت', style: AppTextStyles.body(size: 13, color: AppColors.textDim)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
           ],
         ),
       ),

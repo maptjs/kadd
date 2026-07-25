@@ -19,6 +19,8 @@ class AppState extends ChangeNotifier {
   int streakDays = 0;
   final List<bool> last7Days = List.filled(7, false);
 
+  bool hasUsageAccess = false;
+
   final PrayerTimesService _prayerTimesService = PrayerTimesService();
   final AppUsageService _usageService = AppUsageService();
 
@@ -28,7 +30,19 @@ class AppState extends ChangeNotifier {
     await _usageService.syncLockedPackages(
       apps.where((a) => a.isEnabled).map((a) => a.packageName).toList(),
     );
+    await checkUsageAccess();
   }
+
+  /// Call again on app resume (e.g. after the user comes back from the
+  /// system Usage Access settings screen) — there's no direct callback for
+  /// "permission granted" here, so re-checking on resume is the standard
+  /// pattern for this particular Android permission.
+  Future<void> checkUsageAccess() async {
+    hasUsageAccess = await _usageService.hasUsageAccess();
+    notifyListeners();
+  }
+
+  Future<void> requestUsageAccess() => _usageService.requestUsageAccess();
 
   Future<void> _loadFromDisk() async {
     final prefs = await SharedPreferences.getInstance();
